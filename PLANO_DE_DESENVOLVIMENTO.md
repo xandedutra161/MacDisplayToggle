@@ -5,9 +5,11 @@ App de barra de menu para macOS que desabilita e reabilita monitores de verdade
 BetterDisplay), construído com **Kotlin + Compose Multiplatform (Desktop/JVM)** e
 interop nativa via **JNA**.
 
-> **Status:** Fase 0 implementada (2026-08-29), build e smoke test (`list`) ok na
-> máquina real; **gate de aceite da Fase 0 pendente** (testes destrutivos manuais —
-> checklist e registro em `OBSERVACOES_FASE0.md`).
+> **Status:** Fase 0 implementada e **gates duros do PoC validados na máquina real**
+> (2026-08-29: religamento por enumeração, 5 ciclos seguidos, religamento em
+> processo separado — registro e descobertas em `OBSERVACOES_FASE0.md`).
+> Pendentes da Fase 0: roteiros manuais de standby e sleep/wake (degradáveis)
+> e confirmação visual de modo/refresh.
 > Marcação de progresso nas fases: ✅ concluída · 🔄 em andamento · ⬜ pendente.
 
 ---
@@ -195,7 +197,7 @@ replug do cabo (ou outra porta).
 
 ## 4. Fases de desenvolvimento
 
-### 🔄 Fase 0 — PoC de validação (CLI, sem UI) — implementação ✅ (2026-08-29); gate de aceite pendente
+### 🔄 Fase 0 — PoC de validação (CLI, sem UI) — implementação ✅ · gates duros ✅ (2026-08-29) · standby/sleep-wake pendentes
 
 Objetivo: provar na máquina real (M4/Tahoe) que o ciclo desabilitar→religar funciona
 via Kotlin+JNA, antes de escrever qualquer UI.
@@ -263,9 +265,9 @@ binário: `./gradlew :cli:installDist` → `cli/build/install/mdt-poc/bin/mdt-po
 
 **Critérios de aceite (gate para a Fase 1):**
 
-- [ ] Religamento comprovado por **enumeração** (display de volta à lista online),
-      nunca pelo retorno da API (§2.3 item 1);
-- [ ] Religa **sem replug físico**, repetidamente (≥5 ciclos seguidos);
+- [x] Religamento comprovado por **enumeração** (display de volta à lista online),
+      nunca pelo retorno da API (§2.3 item 1) — ✅ 2026-08-29;
+- [x] Religa **sem replug físico**, repetidamente (≥5 ciclos seguidos) — ✅ 5/5, 2026-08-29;
 - [ ] Religa após o monitor entrar em standby durante o estado desabilitado
       (roteiro: `disable --failsafe 600` → aguardar o auto-standby do monitor →
       `enable` → verificar por enumeração);
@@ -273,16 +275,17 @@ binário: `./gradlew :cli:installDist` → `cli/build/install/mdt-poc/bin/mdt-po
       `disable --failsafe 600` → `pmset sleepnow` com a tampa aberta → acordar →
       `list` para constatar o estado real, pois o macOS pode ter religado sozinho
       (§2.3 item 5) → se continuar desabilitado, `enable` com sucesso);
-- [ ] Religa em execução **separada** do processo que desabilitou (estado vindo do disco);
+- [x] Religa em execução **separada** do processo que desabilitou (estado vindo do disco) — ✅ 2026-08-29;
 - [ ] Registrada a observação: o modo/refresh rate foi **preservado** após religar?
       (O Crisp viu religamentos voltarem no modo padrão do macOS — refresh de 180 Hz
       caindo para o default. Se reproduzir aqui, decidir na Fase 1 se restauramos o
       modo anterior.);
-- [ ] Registradas as observações pendentes da §2: (a) disable com
-      `kCGConfigureForSession` vs `kCGConfigurePermanently` (§2.1; flag opcional
-      `--for-session` no `disable`/`test-cycle`) — **fixa a escolha do flag**;
-      (b) efeito real de um enable/disable redundante (no-op — §2.2);
-      (c) o built-in aparece na lista SLS com ID 1? (heurística do Lunar — §2.2).
+- [x] Registradas as observações pendentes da §2 (✅ 2026-08-29 — detalhes em
+      `OBSERVACOES_FASE0.md`): (a) `--for-session` com paridade total no ciclo —
+      **flag fixado: `kCGConfigurePermanently`**; (b) enable redundante **aborta a
+      transação com erro 1001, sem efeito visual** (o relato não-confirmado do
+      plano CONFIRMOU; o "só pisca" não se reproduziu); (c) built-in com ID 1 —
+      heurística do Lunar CONFERE.
 
 **Regra de decisão do gate:** enumeração, ciclos repetidos e processo separado são
 **gates duros** — se falharem no M4/Tahoe, o projeto para aqui e reavaliamos
