@@ -43,15 +43,20 @@ implementado e com o lado não-visual validado em 2026-08-29. Rodar com:
   janelas na composição** (o tray AWT cru não conta) — corrigido com janela
   âncora invisível permanente.
 
-## Validação manual pendente (usuário — é só usar)
+## Validação manual (usuário, 2026-08-29): ✅ **"testei o app, funcionou tudo"**
 
-- [ ] Clicar no ícone: popup abre na posição do clique e fecha ao clicar fora;
-- [ ] Toggle do LG: diálogo de confirmação → Desabilitar → card "Manter /
-      Religar agora" com countdown de 20 s (deixar expirar uma vez: religa sozinho);
-- [ ] "Manter" → display fica desabilitado → religar pelo toggle;
-- [ ] "Religar todos" com algo desabilitado;
-- [ ] "Sair" religa o que estiver desabilitado por nós e encerra;
-- [ ] Aparência do ícone/popup nos temas claro/escuro.
+- [x] Popup abre na posição do clique e fecha ao clicar fora;
+- [x] Toggle com diálogo de confirmação, card "Manter / Religar agora" e auto-reversão;
+- [x] Religamentos pela UI;
+- [x] "Sair"/fluxos gerais — sem problemas relatados.
+
+## Regra congelada após a validação (decisão de produto, 2026-08-29)
+
+**A tela embutida é intocável** — o app desabilita apenas monitores EXTERNOS
+(religar a embutida continua permitido). Implementação: guard no núcleo
+(`DisplayManager.disable` recusa `builtin`) + toggle travado na UI com status
+"sempre ativa". A ideia de backlog "auto-desabilitar embutido ao conectar
+externo" fica anulada por esta regra (anotado no PLANO).
 
 ## Pendências herdadas (fecham Fases 0–1)
 

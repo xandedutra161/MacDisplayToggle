@@ -42,6 +42,9 @@ class DisplayManager(internal val onLog: (String) -> Unit = ::println) {
         val cur = snap.firstOrNull { it.id == targetId }
             ?: throw DisplayError("display $targetId não encontrado em nenhuma lista")
         if (cur.isPlaceholder) throw DisplayError("alvo é o display placeholder do macOS, não um display real")
+        // Decisão de produto (2026-08-29): a tela embutida é INTOCÁVEL — o app existe
+        // para desabilitar monitores EXTERNOS. Religar embutido continua permitido.
+        if (cur.builtin) throw DisplayError("a tela embutida não pode ser desabilitada — o app desabilita apenas monitores externos")
         if (!cur.online) throw DisplayError("no-op recusado: display $targetId já está desabilitado (§2.2)")
         val remaining = snap.count { it.isActiveReal && it.id != cur.id }
         if (cur.isActiveReal && remaining < 1) {

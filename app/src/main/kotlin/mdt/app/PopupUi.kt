@@ -173,6 +173,8 @@ private fun DisplayRow(d: DisplayInfo, state: AppState, onAskDisable: (DisplayIn
             Text(d.name, style = MaterialTheme.typography.bodyLarge)
             Text(
                 when {
+                    // Tela embutida é intocável (decisão de produto — só religa)
+                    d.builtin && !d.isDisabled -> "sempre ativa — o app só desabilita externos"
                     d.isDisabled -> "desabilitado"
                     d.active -> "ativo"
                     else -> "online (inativo)"
@@ -183,7 +185,8 @@ private fun DisplayRow(d: DisplayInfo, state: AppState, onAskDisable: (DisplayIn
         }
         Switch(
             checked = !d.isDisabled,
-            enabled = !state.busy,
+            // embutido: só religável (toggle travado quando já ativo)
+            enabled = !state.busy && !(d.builtin && !d.isDisabled),
             onCheckedChange = { wantOn -> if (wantOn) state.enable(d) else onAskDisable(d) },
         )
     }

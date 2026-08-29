@@ -5,11 +5,12 @@ App de barra de menu para macOS que desabilita e reabilita monitores de verdade
 BetterDisplay), construído com **Kotlin + Compose Multiplatform (Desktop/JVM)** e
 interop nativa via **JNA**.
 
-> **Status:** Fase 0 implementada e **gates duros do PoC validados na máquina real**
-> (2026-08-29: religamento por enumeração, 5 ciclos seguidos, religamento em
-> processo separado — registro e descobertas em `OBSERVACOES_FASE0.md`).
-> Pendentes da Fase 0: roteiros manuais de standby e sleep/wake (degradáveis)
-> e confirmação visual de modo/refresh.
+> **Status (2026-08-29): TODAS as 4 fases concluídas** — PoC validado na máquina
+> real, núcleo com watcher, app de menu bar validado pelo usuário e `.app`/DMG
+> empacotados. Registros: `OBSERVACOES_FASE0.md` / `FASE1` / `FASE2`; visão geral
+> no `README.md`. Regra de produto congelada: **tela embutida intocável** (§1).
+> Pendências opcionais (manuais, não bloqueantes): roteiros reais de standby do
+> monitor e sleep/wake do Mac.
 > Marcação de progresso nas fases: ✅ concluída · 🔄 em andamento · ⬜ pendente.
 
 ---
@@ -22,7 +23,10 @@ interop nativa via **JNA**.
 - Desabilita um monitor selecionado (disconnect real — o display some da configuração do sistema);
 - Reabilita um monitor desabilitado, **sem replug físico do cabo**;
 - Vive na barra de menu do macOS (sem ícone no Dock);
-- Nunca permite desabilitar o último display ativo.
+- Nunca permite desabilitar o último display ativo;
+- **Nunca desabilita a tela embutida** — o app existe para monitores EXTERNOS;
+  religar a embutida continua permitido (decisão de produto congelada em
+  2026-08-29, regra no núcleo: `DisplayManager.disable`).
 
 **Terminologia:** neste documento, **desabilitar** (= desconectar) é o *disconnect*
 do BetterDisplay — remover o display da configuração ativa; **religar** (= reabilitar)
@@ -197,7 +201,7 @@ replug do cabo (ou outra porta).
 
 ## 4. Fases de desenvolvimento
 
-### 🔄 Fase 0 — PoC de validação (CLI, sem UI) — implementação ✅ · gates duros ✅ (2026-08-29) · standby/sleep-wake pendentes
+### ✅ Fase 0 — PoC de validação (CLI, sem UI) — concluída (2026-08-29): gates duros ✅, observações ✅; standby/sleep-wake reais não executados (degradáveis pela regra de decisão — documentado em `OBSERVACOES_FASE0.md`)
 
 Objetivo: provar na máquina real (M4/Tahoe) que o ciclo desabilitar→religar funciona
 via Kotlin+JNA, antes de escrever qualquer UI.
@@ -294,7 +298,7 @@ Fase 1, desde que a falha seja documentada e a validação do watcher de
 re-aplicação entre como critério de aceite da Fase 1. Os itens de observação
 registrada não são gates.
 
-### 🔄 Fase 1 — Núcleo (`DisplayManager` como biblioteca) — implementação ✅ · critérios validados ✅ (2026-08-29, registro em `OBSERVACOES_FASE1.md`) · pendente: sleep/wake e standby reais (manuais, compartilhados com a Fase 0)
+### ✅ Fase 1 — Núcleo (`DisplayManager` como biblioteca) — concluída (2026-08-29, registro em `OBSERVACOES_FASE1.md`): critérios ✅ (watcher validado por simulação de wake; roteiro real de sleep/wake segue como pendência documentada, não bloqueante)
 
 - Modelo de domínio: `DisplayInfo(id, uuid, nome, builtin, ativo/desabilitado)`;
 - Regras de segurança **no núcleo, não na UI**:
@@ -344,7 +348,7 @@ registrada não são gates.
 - [x] Regra do último display ativo verificada, incluindo o filtro de placeholder
       (§2.3 item 4) — ✅ 2026-08-29 (V2: disable do built-in recusado ao vivo).
 
-### 🔄 Fase 2 — UI de barra de menu (Compose) — implementação ✅ (2026-08-29, Compose 1.9.0; registro em `OBSERVACOES_FASE2.md`) · validação manual da UI pendente (cliques do usuário)
+### ✅ Fase 2 — UI de barra de menu (Compose) — concluída (2026-08-29, Compose 1.9.0; **UI validada pelo usuário: "funcionou tudo"**; registro em `OBSERVACOES_FASE2.md`; regra extra congelada: tela embutida intocável)
 
 - Ícone na barra de menu; clique abre popup Compose:
   lista de monitores com nome + estado + toggle (o AWT não expõe a posição do ícone
@@ -355,7 +359,7 @@ registrada não são gates.
 - Item "Religar todos" sempre visível;
 - Sem janela principal, sem Dock (`LSUIElement`).
 
-### ⬜ Fase 3 — Empacotamento e distribuição
+### ✅ Fase 3 — Empacotamento e distribuição — concluída (2026-08-29): `.app` de 132 MB via jpackage (createDistributable) + DMG 69 MB, `LSUIElement=true` verificado no Info.plist, ícone .icns gerado, assinatura ad-hoc do jpackage confirmada (`codesign -dv`), README final escrito; boot do .app validado
 
 - `.app` via jpackage (plugin Compose), `Info.plist` com `LSUIElement=true`;
 - Ícone do app; assinatura ad-hoc para uso pessoal
@@ -364,7 +368,9 @@ registrada não são gates.
 
 ### Ideias futuras (backlog, não planejar agora)
 
-Atalho global de teclado · auto-desabilitar embutido ao conectar externo ·
+Atalho global de teclado · ~~auto-desabilitar embutido ao conectar externo~~
+(conflita com a regra "embutido intocável" congelada em 2026-08-29 — exigiria
+revogá-la) ·
 CLI própria (`macdisplaytoggle disable <nome>`) · detecção de DisplayLink com aviso ·
 iniciar no login (LaunchAgent ou helper).
 
