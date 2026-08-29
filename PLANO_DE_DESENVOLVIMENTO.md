@@ -344,7 +344,7 @@ registrada não são gates.
 - [x] Regra do último display ativo verificada, incluindo o filtro de placeholder
       (§2.3 item 4) — ✅ 2026-08-29 (V2: disable do built-in recusado ao vivo).
 
-### ⬜ Fase 2 — UI de barra de menu (Compose)
+### 🔄 Fase 2 — UI de barra de menu (Compose) — implementação ✅ (2026-08-29, Compose 1.9.0; registro em `OBSERVACOES_FASE2.md`) · validação manual da UI pendente (cliques do usuário)
 
 - Ícone na barra de menu; clique abre popup Compose:
   lista de monitores com nome + estado + toggle (o AWT não expõe a posição do ícone

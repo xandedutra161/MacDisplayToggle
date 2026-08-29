@@ -4,13 +4,19 @@ Utilitário de barra de menu para macOS (Apple Silicon) que **desabilita e relig
 monitores de verdade** (disconnect real, como o BetterDisplay) — projeto de estudo de
 Kotlin + Compose Desktop (JVM) + JNA.
 
-- Fonte da verdade técnica: **`PLANO_DE_DESENVOLVIMENTO.md`**
-- Status: **Fase 0 (PoC CLI) implementada** — gate de validação em andamento,
-  registro em **`OBSERVACOES_FASE0.md`**
+- Fonte da verdade técnica: **`PLANO_DE_DESENVOLVIMENTO.md`** (progresso marcado por fase)
+- Status: **Fases 0 e 1 validadas na máquina real; Fase 2 (app de menu bar) implementada,
+  em validação manual** — registros em `OBSERVACOES_FASE0.md` / `FASE1` / `FASE2`
 
-Módulos: `:cli` (Fase 0 — PoC), `:core` (Fase 1 — núcleo), `:app` (Fase 2 — UI Compose).
+Módulos: `:core` (núcleo `DisplayManager` + watcher), `:cli` (PoC/harness), `:app` (UI Compose).
 
-## Build
+## App de barra de menu (Fase 2)
+
+```sh
+./gradlew :app:run   # ícone de monitor na barra de menu → clique abre o popup
+```
+
+## CLI (Fases 0–1)
 
 ```sh
 ./gradlew :cli:installDist

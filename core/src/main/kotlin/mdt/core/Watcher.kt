@@ -66,6 +66,31 @@ class Watcher internal constructor(
         return false // só retorna quando o runloop termina (stop ou sem fontes)
     }
 
+    /**
+     * Fase 2 (app): registra o callback SEM bloquear em runloop próprio. Eventos de
+     * transações do PRÓPRIO processo chegam inline (validado na Fase 1) e o registro
+     * mantém as listas frescas (receita ListFreshness); eventos EXTERNOS chegam se o
+     * runloop do host (AppKit/AWT) os entregar — senão o polling de 3 s cobre.
+     */
+    fun registerCallbackOnly() {
+        if (pollOnly || callbackRef != null) return
+        val cb = makeCallback()
+        callbackRef = cb
+        val err = NativeApis.cg.CGDisplayRegisterReconfigurationCallback(cb, null)
+        if (err == 0) {
+            onLog("watcher: callback registrado (sem runloop dedicado; eventos inline + polling 3 s)")
+        } else {
+            callbackRef = null
+            onLog("watcher: registro do callback falhou (${cgErrorName(err)}) — só polling")
+        }
+    }
+
+    private fun makeCallback(): DisplayReconfigurationCallback = object : DisplayReconfigurationCallback {
+        override fun invoke(display: Int, flags: Int, userInfo: Pointer?) {
+            events.offer(display to flags) // só enfileirar — nada de trabalho aqui
+        }
+    }
+
     fun stop() {
         running = false
         runLoopRef?.let { NativeApis.cf.CFRunLoopStop(it) }
@@ -74,11 +99,7 @@ class Watcher internal constructor(
     }
 
     private fun runLoopBody() {
-        val cb = object : DisplayReconfigurationCallback {
-            override fun invoke(display: Int, flags: Int, userInfo: Pointer?) {
-                events.offer(display to flags) // só enfileirar — nada de trabalho aqui
-            }
-        }
+        val cb = makeCallback()
         callbackRef = cb
         val err = NativeApis.cg.CGDisplayRegisterReconfigurationCallback(cb, null)
         if (err != 0) {
