@@ -1,15 +1,20 @@
-package mdt.cli
+package mdt.core
 
+import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
-import mdt.ffi.NativeApis
-import mdt.ffi.PLACEHOLDER_MODEL
-import mdt.ffi.PLACEHOLDER_VENDOR
-import mdt.ffi.cgErrorName
-import mdt.ffi.kCFStringEncodingUTF8
+import mdt.core.ffi.DisplayReconfigurationCallback
+import mdt.core.ffi.NativeApis
+import mdt.core.ffi.PLACEHOLDER_MODEL
+import mdt.core.ffi.PLACEHOLDER_VENDOR
+import mdt.core.ffi.cgErrorName
+import mdt.core.ffi.kCFStringEncodingUTF8
+import java.time.OffsetDateTime
+import java.util.Locale
 
-class PocError(message: String) : RuntimeException(message)
+class DisplayError(message: String) : RuntimeException(message)
 
-data class DisplayState(
+/** Modelo de domínio da Fase 1 (PLANO §4): id, uuid, nome, builtin, ativo/desabilitado. */
+data class DisplayInfo(
     val id: Int,
     val uuid: String?,
     val vendor: Int,
@@ -23,6 +28,17 @@ data class DisplayState(
     val isPlaceholder: Boolean get() = vendor == PLACEHOLDER_VENDOR && model == PLACEHOLDER_MODEL
     val isDisabled: Boolean get() = inSls && !online
     val isActiveReal: Boolean get() = active && !isPlaceholder
+
+    // Fase 1: vendor/model como nome (PLANO §3); nome amigável via NSScreen fica p/ Fase 2
+    val name: String
+        get() = when {
+            isPlaceholder -> "Placeholder do macOS"
+            builtin -> "Display embutido"
+            else -> "Display %04X:%04X".format(Locale.ROOT, vendor, model)
+        }
+
+    fun toSaved(): SavedDisplay =
+        SavedDisplay(id, uuid, vendor, model, serial, builtin, savedAt = OffsetDateTime.now().withNano(0).toString())
 }
 
 object Displays {
@@ -56,7 +72,11 @@ object Displays {
         return ids.take(countRef.value)
     }
 
-    /** UUID como string maiúscula, ou null se o sistema não tiver UUID para esse ID. */
+    /**
+     * UUID como string maiúscula, ou null. Descoberta da Fase 0: para display
+     * DESABILITADO isto retorna null no Tahoe 26.5.2 — a re-resolução efetiva de
+     * religamento é o ID persistido (e serial como plano B).
+     */
     fun uuidOf(id: Int): String? {
         val uuidRef = NativeApis.createUuidFromDisplayId.invokePointer(arrayOf<Any?>(id)) ?: return null
         try {
@@ -77,8 +97,18 @@ object Displays {
     fun findByUuidInSls(uuid: String): Int? =
         slsIds().firstOrNull { uuidOf(it)?.equals(uuid, ignoreCase = true) == true }
 
-    /** União das listas pública (online/ativa) e SLS — a comparação entre elas é o que revela desabilitados. */
-    fun snapshot(): List<DisplayState> {
+    /** Plano B de re-resolução (Fase 0, descoberta 1): serial/vendor/model são legíveis mesmo desabilitado. */
+    fun findBySerialInSls(vendor: Int, model: Int, serial: Int): Int? {
+        if (serial == 0 && vendor == 0) return null
+        return slsIds().firstOrNull {
+            NativeApis.cg.CGDisplayVendorNumber(it) == vendor &&
+                NativeApis.cg.CGDisplayModelNumber(it) == model &&
+                NativeApis.cg.CGDisplaySerialNumber(it) == serial
+        }
+    }
+
+    /** União das listas pública (online/ativa) e SLS — a comparação entre elas revela desabilitados. */
+    fun snapshot(): List<DisplayInfo> {
         val online = onlineIds()
         val active = activeIds().toSet()
         val sls = slsIds()
@@ -86,7 +116,7 @@ object Displays {
         val slsSet = sls.toSet()
         val ids = LinkedHashSet<Int>().apply { addAll(online); addAll(sls) }
         return ids.map { id ->
-            DisplayState(
+            DisplayInfo(
                 id = id,
                 uuid = uuidOf(id),
                 vendor = NativeApis.cg.CGDisplayVendorNumber(id),
@@ -101,6 +131,27 @@ object Displays {
     }
 
     private fun check0(err: Int, what: String) {
-        if (err != 0) throw PocError("$what falhou: ${cgErrorName(err)}")
+        if (err != 0) throw DisplayError("$what falhou: ${cgErrorName(err)}")
+    }
+}
+
+/**
+ * Frescor das listas (validado na Fase 1): um processo JVM de longa duração SEM
+ * callback registrado lê listas CG stale (o processo A da Fase 0 ficou 20+ s cego a
+ * um religamento externo). Com `CGDisplayRegisterReconfigurationCallback` chamado —
+ * mesmo que o runloop nunca rode e o callback nunca dispare (JVM sem AppKit não tem
+ * fontes de runloop) — as enumerações voltam a refletir a realidade em segundos.
+ * Chamar [ensure] uma vez antes de qualquer loop longo de polling.
+ */
+object ListFreshness {
+    private var cb: DisplayReconfigurationCallback? = null // referência forte (GC do JNA)
+
+    @Synchronized
+    fun ensure() {
+        if (cb != null) return
+        val c = object : DisplayReconfigurationCallback {
+            override fun invoke(display: Int, flags: Int, userInfo: Pointer?) {}
+        }
+        if (NativeApis.cg.CGDisplayRegisterReconfigurationCallback(c, null) == 0) cb = c
     }
 }

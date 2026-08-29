@@ -1,7 +1,7 @@
-package mdt.cli
+package mdt.core
 
-import mdt.ffi.cgErrorName
-import mdt.ffi.kCGConfigurePermanently
+import mdt.core.ffi.cgErrorName
+import mdt.core.ffi.kCGConfigurePermanently
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -16,7 +16,7 @@ object Ops {
     fun disableVerified(targetId: Int, flag: Int) {
         val future = Transactions.fire(targetId, false, flag)
         val err = awaitTransaction(future, 15)
-        if (err != null && err != 0) throw PocError("disable falhou na transação: ${cgErrorName(err)}")
+        if (err != null && err != 0) throw DisplayError("disable falhou na transação: ${cgErrorName(err)}")
         if (err == null) println("  disable: Complete ainda em voo após 15 s (§2.3 item 2) — verificando por enumeração mesmo assim")
 
         val deadline = System.currentTimeMillis() + 6_000
@@ -32,22 +32,23 @@ object Ops {
             }
             Thread.sleep(300)
         }
-        throw PocError("display $targetId continua na lista online após o disable — a transação não teve efeito")
+        throw DisplayError("display $targetId continua na lista online após o disable — a transação não teve efeito")
     }
 
     /**
      * Religa com verificação por enumeração e retry (PLANO §2.3 item 1): enable em
      * fire-and-forget, janela de verificação de ~4,5 s, até 3 tentativas, nunca
      * re-emitindo enquanto um Complete anterior estiver em voo.
+     * Re-resolução (Fase 0, descoberta 1): UUID → serial (plano B) → ID salvo.
      * @return o ID online do display religado, ou null se não voltou.
      */
     fun enableVerified(saved: SavedDisplay, attempts: Int = 3, windowMs: Long = 4_500): Int? {
         matchOnline(saved)?.let { return it }
         var lastFired: CompletableFuture<Int>? = null
         repeat(attempts) { i ->
-            // Re-resolução por UUID via SLS; ID salvo é o fallback — inclusive no
-            // estado só-placeholder, em que o lookup por UUID falha (§2.3 item 4).
-            val id = saved.uuid?.let { Displays.findByUuidInSls(it) } ?: saved.id
+            val id = saved.uuid?.let { Displays.findByUuidInSls(it) }
+                ?: Displays.findBySerialInSls(saved.vendor, saved.model, saved.serial)
+                ?: saved.id
             val fired = Transactions.fireIfIdle(id, true, kCGConfigurePermanently)
             if (fired != null) {
                 println("  enable: tentativa ${i + 1}/$attempts → ConfigureDisplayEnabled($id, true) [fire-and-forget]")
@@ -74,7 +75,7 @@ object Ops {
     } catch (_: TimeoutException) {
         null
     } catch (e: ExecutionException) {
-        throw PocError("falha na chamada nativa da transação: ${e.cause?.message ?: e.message}")
+        throw DisplayError("falha na chamada nativa da transação: ${e.cause?.message ?: e.message}")
     }
 
     /** O display salvo está online AGORA? Match primário por UUID; ID só quando não há UUID para desmentir. */
@@ -105,7 +106,8 @@ object Ops {
 /**
  * Failsafe interno de encerramento: se o processo morrer/for interrompido com um
  * display desabilitado, tenta religar no shutdown hook. NÃO substitui o watchdog
- * externo do protocolo — um SIGSEGV de binding derruba a JVM sem rodar hooks.
+ * externo do protocolo — um SIGSEGV/SIGKILL derruba a JVM sem rodar hooks
+ * (recuperação nesse caso: `reconcile` na próxima execução — § Fase 1).
  */
 object PanicGuard {
     @Volatile

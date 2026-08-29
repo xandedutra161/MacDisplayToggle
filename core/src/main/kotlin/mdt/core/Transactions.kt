@@ -1,7 +1,7 @@
-package mdt.cli
+package mdt.core
 
 import com.sun.jna.ptr.PointerByReference
-import mdt.ffi.NativeApis
+import mdt.core.ffi.NativeApis
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -11,7 +11,7 @@ import java.util.concurrent.CompletableFuture
  * cancelável via JNA (PLANO §2.3 item 2): no timeout abandona-se a espera (a thread
  * fica presa até a chamada retornar) e nenhuma outra transação é iniciada enquanto
  * esta não retornar — quem garante isso é [fireIfIdle] (check + start atômicos, o que
- * cobre a corrida entre a thread principal e o shutdown hook do PanicGuard).
+ * cobre corridas entre threads, ex.: worker do watcher × shutdown hook).
  */
 object Transactions {
     @Volatile
@@ -39,7 +39,7 @@ object Transactions {
 
     fun fire(displayId: Int, enabled: Boolean, flag: Int): CompletableFuture<Int> =
         fireIfIdle(displayId, enabled, flag)
-            ?: throw PocError("transação de configuração anterior ainda em voo")
+            ?: throw DisplayError("transação de configuração anterior ainda em voo")
 
     private fun run(displayId: Int, enabled: Boolean, flag: Int): Int {
         val ref = PointerByReference()

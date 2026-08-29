@@ -276,10 +276,9 @@ binário: `./gradlew :cli:installDist` → `cli/build/install/mdt-poc/bin/mdt-po
       `list` para constatar o estado real, pois o macOS pode ter religado sozinho
       (§2.3 item 5) → se continuar desabilitado, `enable` com sucesso);
 - [x] Religa em execução **separada** do processo que desabilitou (estado vindo do disco) — ✅ 2026-08-29;
-- [ ] Registrada a observação: o modo/refresh rate foi **preservado** após religar?
-      (O Crisp viu religamentos voltarem no modo padrão do macOS — refresh de 180 Hz
-      caindo para o default. Se reproduzir aqui, decidir na Fase 1 se restauramos o
-      modo anterior.);
+- [x] Registrada a observação: o modo/refresh rate foi **preservado** após religar?
+      — ✅ 2026-08-29: confirmado pelo usuário, sem anomalia nos 7 religamentos
+      (o modo-padrão do Crisp não se reproduziu; nada a restaurar na Fase 1);
 - [x] Registradas as observações pendentes da §2 (✅ 2026-08-29 — detalhes em
       `OBSERVACOES_FASE0.md`): (a) `--for-session` com paridade total no ciclo —
       **flag fixado: `kCGConfigurePermanently`**; (b) enable redundante **aborta a
@@ -295,7 +294,7 @@ Fase 1, desde que a falha seja documentada e a validação do watcher de
 re-aplicação entre como critério de aceite da Fase 1. Os itens de observação
 registrada não são gates.
 
-### ⬜ Fase 1 — Núcleo (`DisplayManager` como biblioteca)
+### 🔄 Fase 1 — Núcleo (`DisplayManager` como biblioteca) — implementação ✅ · critérios validados ✅ (2026-08-29, registro em `OBSERVACOES_FASE1.md`) · pendente: sleep/wake e standby reais (manuais, compartilhados com a Fase 0)
 
 - Modelo de domínio: `DisplayInfo(id, uuid, nome, builtin, ativo/desabilitado)`;
 - Regras de segurança **no núcleo, não na UI**:
@@ -336,13 +335,14 @@ registrada não são gates.
 
 **Critérios de aceite (gate para a Fase 2):**
 
-- [ ] Roteiros manuais executados sem deixar nenhum display preso desabilitado
+- [x] Roteiros manuais executados sem deixar nenhum display preso desabilitado
       (incluindo `kill -9` do processo host do núcleo com display desabilitado →
-      religamento oferecido na inicialização seguinte);
-- [ ] Watcher de re-aplicação validado nos roteiros de sleep/wake — **obrigatório**
-      se o gate da Fase 0 degradou standby/sleep;
-- [ ] Regra do último display ativo verificada, incluindo o filtro de placeholder
-      (§2.3 item 4).
+      religamento oferecido na inicialização seguinte) — ✅ 2026-08-29 (V2);
+- [x] Watcher de re-aplicação validado — ✅ 2026-08-29 via simulação de wake (V3:
+      religado por fora + estado desejado restaurado → re-aplicou no tick seguinte);
+      roteiro REAL de sleep/wake segue pendente (manual);
+- [x] Regra do último display ativo verificada, incluindo o filtro de placeholder
+      (§2.3 item 4) — ✅ 2026-08-29 (V2: disable do built-in recusado ao vivo).
 
 ### ⬜ Fase 2 — UI de barra de menu (Compose)
 

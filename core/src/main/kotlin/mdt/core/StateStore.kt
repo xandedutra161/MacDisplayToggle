@@ -1,4 +1,4 @@
-package mdt.cli
+package mdt.core
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -8,8 +8,9 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
 /**
- * Identidade persistida ANTES de desabilitar (PLANO §2.2): UUID é a chave primária
- * de re-resolução, ID o fallback, serial identidade extra.
+ * Identidade persistida ANTES de desabilitar (PLANO §2.2). Descoberta da Fase 0:
+ * com o display desabilitado o UUID não resolve — o ID é a chave efetiva de
+ * religamento e vendor/model/serial são o plano B de matching.
  */
 @Serializable
 data class SavedDisplay(
@@ -27,6 +28,7 @@ data class SavedDisplay(
         if (uuid != null && other.uuid != null) uuid.equals(other.uuid, ignoreCase = true) else id == other.id
 }
 
+/** `disabledByUs` = desabilitados POR NÓS e desejados desabilitados (o watcher re-aplica — § Fase 1). */
 @Serializable
 data class PocState(val disabledByUs: List<SavedDisplay> = emptyList())
 

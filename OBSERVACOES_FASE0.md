@@ -37,7 +37,7 @@ re-aplicação a critério da Fase 1 (regra de decisão do plano).
 | a | `--for-session` vs `kCGConfigurePermanently` no disable (§2.1) | Ciclo `--for-session` idêntico ao padrão (SUCESSO 15,7 s, 1ª tentativa, ID inalterado). Reversão por logout/restart NÃO testada (manual, opcional). **Decisão: manter `kCGConfigurePermanently` como default** (paridade comprovada + padrão Lunar/BetterDisplay) |
 | b | Efeito de chamada redundante (§2.2) | **Enable redundante ABORTA a transação com `kCGErrorIllegalArgument(1001)`, sem efeito visual** — o relato de "erro que aborta" (que o plano marcava como não confirmado) CONFIRMOU; o "só pisca" do Crisp não se reproduziu aqui. Guard de no-op é obrigatório. Disable redundante: não testado (exigiria alvo desabilitado; opcional) |
 | c | Built-in na lista SLS com ID 1? (§2.2) | ✅ CONFERE — built-in id=1 em todas as enumerações |
-| d | Modo/refresh preservado após religar? | Sem anomalia percebida nos 6 ciclos; **falta confirmação visual explícita do usuário** (Configurações → Displays após um ciclo) |
+| d | Modo/refresh preservado após religar? | ✅ **Confirmado pelo usuário** (2026-08-29): "deu certo, desligou e ligou" — sem anomalia de modo/refresh relatada nos 7 religamentos |
 | e | ID mudou após ciclo disable→enable? | NÃO — id=3 estável em todos os ciclos, inclusive no processo separado |
 
 ## Descobertas extras (entram no design da Fase 1)
