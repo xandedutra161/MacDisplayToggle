@@ -109,6 +109,7 @@ fun main() {
                 }
                 PopupUi(
                     state = state,
+                    onMinimize = { popupVisible = false },
                     onQuit = {
                         state.busy = true
                         state.lastMessage = "encerrando: religando os monitores externos que NÓS desligamos…"

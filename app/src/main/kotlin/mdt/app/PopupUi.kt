@@ -19,6 +19,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -41,7 +42,7 @@ import kotlinx.coroutines.delay
 import mdt.core.application.ExternalDisplayView
 
 @Composable
-fun PopupUi(state: AppState, onQuit: () -> Unit) {
+fun PopupUi(state: AppState, onQuit: () -> Unit, onMinimize: () -> Unit) {
     var confirmTarget by remember { mutableStateOf<ExternalDisplayView?>(null) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
 
@@ -86,7 +87,27 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
                         fontWeight = FontWeight.SemiBold,
                     )
                     Spacer(Modifier.weight(1f))
-                    if (state.busy) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    if (state.busy) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    IconButton(onClick = onMinimize, modifier = Modifier.size(24.dp)) {
+                        Text(
+                            "—",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                    Spacer(Modifier.width(2.dp))
+                    // Encerra o app (religando os monitores que ele desligou)
+                    IconButton(onClick = onQuit, modifier = Modifier.size(24.dp)) {
+                        Text(
+                            "✕",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
 
                 if (state.clamshellRisk) {
@@ -144,12 +165,8 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
 
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
-                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Sempre visível
-                    TextButton(onClick = { state.enableAllOurs() }) { Text("Religar todos") }
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = onQuit) { Text("Sair") }
-                }
+                // Sempre visível
+                TextButton(onClick = { state.enableAllOurs() }, Modifier.padding(top = 4.dp)) { Text("Religar todos") }
             }
         }
     }
