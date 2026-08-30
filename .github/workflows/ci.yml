@@ -1,0 +1,24 @@
+# CI mínimo da Fase E: compila e roda os testes unitários (fakes, sem tocar em
+# display real). Testes destrutivos continuam manuais — ver PLANO §4.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    # macos-14+ = Apple Silicon, mesmo alvo do projeto (JNA/SkyLight arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build, testes e distribuição da CLI
+        run: ./gradlew check :cli:installDist
+      - name: Smoke-test do binário da CLI (--help não toca em display)
+        run: cli/build/install/macdisplaytoggle/bin/macdisplaytoggle --help

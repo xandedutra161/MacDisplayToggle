@@ -2,67 +2,12 @@ package mdt.core
 
 import com.sun.jna.Pointer
 import com.sun.jna.ptr.IntByReference
-import mdt.core.ffi.DisplayReconfigurationCallback
-import mdt.core.ffi.NativeApis
-import mdt.core.ffi.PLACEHOLDER_MODEL
-import mdt.core.ffi.PLACEHOLDER_VENDOR
-import mdt.core.ffi.cgErrorName
-import mdt.core.ffi.kCFStringEncodingUTF8
-import java.time.OffsetDateTime
-import java.util.Locale
-
-class DisplayError(message: String) : RuntimeException(message)
-
-/** Modelo de domínio da Fase 1 (PLANO §4): id, uuid, nome, builtin, ativo/desabilitado. */
-data class DisplayInfo(
-    val id: Int,
-    val uuid: String?,
-    val vendor: Int,
-    val model: Int,
-    val serial: Int,
-    val builtin: Boolean,
-    val active: Boolean,
-    val online: Boolean,
-    val inSls: Boolean,
-) {
-    val isPlaceholder: Boolean get() = vendor == PLACEHOLDER_VENDOR && model == PLACEHOLDER_MODEL
-    val isDisabled: Boolean get() = inSls && !online
-    val isActiveReal: Boolean get() = active && !isPlaceholder
-
-    // Nome via decode PNP do vendor EDID (PLANO §3 — NSScreen.localizedName só se valer a pena)
-    val name: String
-        get() = when {
-            isPlaceholder -> "Placeholder do macOS"
-            builtin -> "Tela embutida"
-            else -> {
-                val pnp = decodePnpVendor(vendor)
-                val brand = PNP_BRANDS[pnp] ?: pnp
-                if (brand != null) "$brand (%04X)".format(Locale.ROOT, model)
-                else "Display %04X:%04X".format(Locale.ROOT, vendor, model)
-            }
-        }
-
-    fun toSaved(): SavedDisplay =
-        SavedDisplay(id, uuid, vendor, model, serial, builtin, savedAt = OffsetDateTime.now().withNano(0).toString())
-}
-
-/** Decodifica o vendor EDID (3 letras empacotadas em 5 bits cada, A=1). Ex.: 0x1E6D → "GSM". */
-fun decodePnpVendor(v: Int): String? {
-    if (v <= 0 || v > 0x7FFF) return null
-    val c1 = (v shr 10) and 0x1F
-    val c2 = (v shr 5) and 0x1F
-    val c3 = v and 0x1F
-    if (c1 !in 1..26 || c2 !in 1..26 || c3 !in 1..26) return null
-    return "${'A' + (c1 - 1)}${'A' + (c2 - 1)}${'A' + (c3 - 1)}"
-}
-
-val PNP_BRANDS: Map<String, String> = mapOf(
-    "GSM" to "LG", "APP" to "Apple", "SAM" to "Samsung", "DEL" to "Dell",
-    "ACR" to "Acer", "AOC" to "AOC", "PHL" to "Philips", "BNQ" to "BenQ",
-    "HPN" to "HP", "HWP" to "HP", "LEN" to "Lenovo", "VSC" to "ViewSonic",
-    "AUS" to "ASUS", "GBT" to "Gigabyte", "MSI" to "MSI", "SNY" to "Sony",
-    "XMI" to "Xiaomi", "HEC" to "Huawei",
-)
+import mdt.core.domain.DisplayError
+import mdt.core.domain.DisplayInfo
+import mdt.core.jna.DisplayReconfigurationCallback
+import mdt.core.jna.NativeApis
+import mdt.core.jna.cgErrorName
+import mdt.core.jna.kCFStringEncodingUTF8
 
 object Displays {
 
@@ -74,7 +19,7 @@ object Displays {
         NativeApis.cg.CGGetActiveDisplayList(max, arr, count)
     }
 
-    /** Lista privada do SkyLight — inclui displays desabilitados (PLANO §2.2). */
+    /** Lista privada do SkyLight — inclui displays desabilitados. */
     fun slsIds(): List<Int> {
         val countRef = IntByReference()
         check0(NativeApis.slsGetDisplayList.invokeInt(arrayOf<Any?>(0, null, countRef)), "SLSGetDisplayList(contagem)")
@@ -96,7 +41,7 @@ object Displays {
     }
 
     /**
-     * UUID como string maiúscula, ou null. Descoberta da Fase 0: para display
+     * UUID como string maiúscula, ou null. Descoberta em máquina real: para display
      * DESABILITADO isto retorna null no Tahoe 26.5.2 — a re-resolução efetiva de
      * religamento é o ID persistido (e serial como plano B).
      */
@@ -120,7 +65,7 @@ object Displays {
     fun findByUuidInSls(uuid: String): Int? =
         slsIds().firstOrNull { uuidOf(it)?.equals(uuid, ignoreCase = true) == true }
 
-    /** Plano B de re-resolução (Fase 0, descoberta 1): serial/vendor/model são legíveis mesmo desabilitado. */
+    /** Plano B de re-resolução: serial/vendor/model são legíveis mesmo desabilitado. */
     fun findBySerialInSls(vendor: Int, model: Int, serial: Int): Int? {
         if (serial == 0 && vendor == 0) return null
         return slsIds().firstOrNull {
@@ -159,8 +104,8 @@ object Displays {
 }
 
 /**
- * Frescor das listas (validado na Fase 1): um processo JVM de longa duração SEM
- * callback registrado lê listas CG stale (o processo A da Fase 0 ficou 20+ s cego a
+ * Frescor das listas (validado em máquina real): um processo JVM de longa duração SEM
+ * callback registrado lê listas CG stale (um processo observador chegou a ficar 20+ s cego a
  * um religamento externo). Com `CGDisplayRegisterReconfigurationCallback` chamado —
  * mesmo que o runloop nunca rode e o callback nunca dispare (JVM sem AppKit não tem
  * fontes de runloop) — as enumerações voltam a refletir a realidade em segundos.

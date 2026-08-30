@@ -5,95 +5,112 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import mdt.core.DisplayInfo
-import mdt.core.DisplayManager
-import mdt.core.SavedDisplay
+import mdt.core.application.DisableResult
+import mdt.core.application.DisplayHandle
+import mdt.core.application.EnableResult
+import mdt.core.application.ExternalDisplayToggleFacade
+import mdt.core.application.ExternalDisplayView
+import mdt.core.domain.DisableBlock
 
-class PendingRevert(val saved: SavedDisplay, val deadlineMs: Long)
+class PendingRevert(val handle: DisplayHandle, val deadlineMs: Long)
 
 /**
  * Estado da UI. As operações rodam em Dispatchers.IO (religamento verifica por
  * enumeração e pode levar segundos — nunca na thread de UI); escrita de snapshot
  * state fora da UI thread é segura no Compose.
  */
-class AppState(val manager: DisplayManager, private val scope: CoroutineScope) {
-    var displays by mutableStateOf(emptyList<DisplayInfo>())
+class AppState(private val facade: ExternalDisplayToggleFacade, private val scope: CoroutineScope) {
+    var externalDisplays by mutableStateOf(emptyList<ExternalDisplayView>())
     var busy by mutableStateOf(false)
     var lastMessage by mutableStateOf<String?>(null)
     var pendingRevert by mutableStateOf<PendingRevert?>(null)
+    var clamshellRisk by mutableStateOf(false)
 
-    val isNotebook: Boolean get() = manager.isNotebook
-
-    /** Cenário clamshell AGORA: notebook sem built-in ativo nas listas (§2.3 itens 3/6). */
-    val clamshellRisk: Boolean
-        get() = isNotebook && displays.none { it.builtin && it.active }
+    var isNotebook by mutableStateOf(false)
+        private set
 
     fun refresh() {
         scope.launch {
             runCatching {
-                displays = manager.snapshot().filter { d ->
-                    // ocultar o placeholder e entradas SLS sem identidade (ghost sem UUID/vendor/serial)
-                    !d.isPlaceholder && !(d.isDisabled && d.uuid == null && d.vendor == 0 && d.serial == 0)
-                }
+                val snapshot = facade.snapshot()
+                externalDisplays = snapshot.externalDisplays
+                isNotebook = snapshot.isNotebook
+                clamshellRisk = snapshot.clamshellRisk
             }.onFailure { lastMessage = "erro ao listar: ${it.message}" }
         }
     }
 
-    /** Desabilita com timer de reversão automática (§ Fase 1 — estilo diálogo de resolução). */
-    fun requestDisable(d: DisplayInfo, revertSeconds: Long = 20) {
+    /** Desliga com timer de reversão automática. */
+    fun requestDisable(d: ExternalDisplayView, revertSeconds: Long = 20) {
         if (busy) return
         busy = true
         scope.launch {
             runCatching {
-                val saved = manager.disableWithAutoRevert(d.id, revertSeconds)
-                pendingRevert = PendingRevert(saved, System.currentTimeMillis() + revertSeconds * 1000)
-                lastMessage = "\"${d.name}\" desabilitado — reverte sozinho em ${revertSeconds}s se você não mantiver"
-            }.onFailure { lastMessage = "não desabilitei: ${it.message}" }
+                when (val r = facade.disableExternalWithAutoRevert(d.id, revertSeconds)) {
+                    is DisableResult.Disabled -> {
+                        r.pendingRevert?.let { pendingRevert = PendingRevert(it.handle, it.deadlineMs) }
+                        lastMessage = "\"${d.name}\" desligado — reverte sozinho em ${revertSeconds}s se você não mantiver"
+                    }
+                    is DisableResult.Blocked -> lastMessage = "não desliguei: ${blockedMessage(r.reason)}"
+                    is DisableResult.NotFound -> lastMessage = "não desliguei: \"${d.name}\" não está mais conectado"
+                    is DisableResult.Failed -> lastMessage = "não desliguei: ${r.message}"
+                }
+            }.onFailure { lastMessage = "não desliguei: ${it.message}" }
             busy = false
             refresh()
         }
     }
 
+    private fun blockedMessage(reason: DisableBlock): String = when (reason) {
+        DisableBlock.BUILTIN -> "a tela embutida não pode ser desligada"
+        DisableBlock.LAST_ACTIVE_REAL -> "é o último display ativo — desligá-lo apagaria a tela da máquina"
+        DisableBlock.ALREADY_DISABLED -> "já está desligado"
+        DisableBlock.PLACEHOLDER -> "não é um monitor real"
+    }
+
     fun keepDisabled() {
         val p = pendingRevert ?: return
-        manager.confirmDisable(p.saved)
+        facade.confirmDisable(p.handle)
         pendingRevert = null
-        lastMessage = "mantido desabilitado — religue pelo toggle ou \"Religar todos\""
+        lastMessage = "mantido desligado — religue pelo toggle ou \"Religar todos\""
     }
 
     fun revertNow() {
         val p = pendingRevert ?: return
         pendingRevert = null
-        enableSaved(p.saved)
+        enableHandle(p.handle)
     }
 
-    fun enable(d: DisplayInfo) = enableSaved(d.toSaved())
+    fun enable(d: ExternalDisplayView) = enableHandle(d.handle)
 
-    private fun enableSaved(saved: SavedDisplay) {
+    private fun enableHandle(handle: DisplayHandle) {
         if (busy) return
         busy = true
         scope.launch {
             runCatching {
-                manager.confirmDisable(saved) // cancela auto-revert pendente deste display
-                val id = manager.enable(saved)
-                lastMessage = if (id != null) "religado (id=$id, comprovado por enumeração)"
-                else "NÃO religou — tente \"Religar todos\" ou o playbook de emergência (PLANO §2.4)"
+                facade.confirmDisable(handle) // cancela auto-revert pendente deste monitor
+                lastMessage = when (val r = facade.enableExternal(handle)) {
+                    is EnableResult.Enabled -> "religado (id=${r.onlineId}, comprovado por enumeração)"
+                    is EnableResult.VerificationTimedOut ->
+                        "NÃO religou — tente \"Religar todos\" ou o playbook de emergência"
+                    is EnableResult.Failed -> "erro ao religar: ${r.message}"
+                }
             }.onFailure { lastMessage = "erro: ${it.message}" }
-            if (pendingRevert?.saved?.matches(saved) == true) pendingRevert = null
+            if (pendingRevert?.handle?.matches(handle) == true) pendingRevert = null
             busy = false
             refresh()
         }
     }
 
-    /** Sempre visível na UI (PLANO §4/Fase 2); religa apenas o que NÓS desabilitamos. */
+    /** Sempre visível na UI; religa apenas o que NÓS desabilitamos. */
     fun enableAllOurs() {
         if (busy) return
         busy = true
         scope.launch {
             runCatching {
-                val res = manager.enableAllOurs()
-                val ok = res.values.count { it != null }
-                lastMessage = if (res.isEmpty()) "nenhum display desabilitado por nós" else "religados: $ok/${res.size}"
+                val res = facade.enableAllManaged()
+                val ok = res.count { it is EnableResult.Enabled }
+                lastMessage = if (res.isEmpty()) "nenhum monitor externo desligado por nós" else "religados: $ok/${res.size}"
             }.onFailure { lastMessage = "erro: ${it.message}" }
             pendingRevert = null
             busy = false

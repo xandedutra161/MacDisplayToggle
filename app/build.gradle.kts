@@ -1,7 +1,7 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
-// Fase 2: UI de barra de menu — Tray AWT + popup Compose sem decoração (PLANO §3).
-// Fase 3: empacotamento .app via jpackage (plugin Compose), LSUIElement, ícone.
+// UI de barra de menu — Tray AWT + popup Compose sem decoração.
+// Empacotamento .app via jpackage (plugin Compose), LSUIElement, ícone.
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.compose.compiler)
@@ -28,9 +28,9 @@ compose.desktop {
             macOS {
                 bundleID = "dev.macdisplaytoggle.app"
                 iconFile.set(project.file("icons/MacDisplayToggle.icns"))
-                // Sem ícone no Dock / sem janela principal (PLANO §4/Fase 3).
+                // Sem ícone no Dock / sem janela principal.
                 // Assinatura: ad-hoc do próprio jpackage (uso pessoal; sem sandbox,
-                // API privada ⇒ fora da App Store — PLANO §2.4).
+                // API privada ⇒ fora da App Store).
                 infoPlist {
                     extraKeysRawXml = """
                         <key>LSUIElement</key>

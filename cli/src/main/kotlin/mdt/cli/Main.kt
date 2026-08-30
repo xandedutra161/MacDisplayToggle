@@ -1,40 +1,41 @@
 package mdt.cli
 
-import mdt.core.DisplayError
+import mdt.core.domain.DisplayError
 import kotlin.system.exitProcess
 
-private const val USAGE = """MacDisplayToggle — CLI (Fase 0: PoC de validação · Fase 1: harness do núcleo)
+private const val USAGE = """MacDisplayToggle — CLI técnica e ferramenta de recuperação
 
 USO:
-  mdt-poc list
-  mdt-poc test-cycle <id|uuid> [--wait <s>]      [--for-session] [--yes]
-  mdt-poc disable    <id|uuid> --failsafe <s>    [--for-session] [--allow-redundant] [--yes]
-  mdt-poc enable     [<id|uuid>]                 [--allow-redundant]
-  mdt-poc reconcile  [--auto]
-  mdt-poc watch      [--poll]
+  macdisplaytoggle list
+  macdisplaytoggle test-cycle <id|uuid> [--wait <s>]      [--for-session] [--yes]
+  macdisplaytoggle disable    <id|uuid> --failsafe <s>    [--for-session] [--allow-redundant] [--yes]
+  macdisplaytoggle enable     [<id|uuid>]                 [--allow-redundant]
+  macdisplaytoggle reconcile  [--auto]
+  macdisplaytoggle watch      [--poll]
 
 COMANDOS:
-  list        displays ativos + desabilitados (lista pública × lista SLS) e estado salvo
+  list        diagnostico completo: displays ativos + desabilitados (lista pública × lista SLS)
   test-cycle  salva identidade em disco → desabilita → religa sozinho após --wait s (padrão 15)
-  disable     salva identidade e desabilita; religa quando o --failsafe (obrigatório) expirar,
+  disable     salva identidade e desabilita um monitor externo; religa quando o --failsafe (obrigatório) expirar,
               quando o display voltar por fora (outro processo/wake) ou no Ctrl+C
   enable      religa a partir do estado salvo (ou do <id|uuid> dado) — botão de pânico.
               Não funciona via SSH: as APIs exigem processo dentro da sessão gráfica.
-  reconcile   Fase 1: reconciliação de inicialização — remove estado obsoleto e detecta
+  reconcile   reconciliação de inicialização — remove estado obsoleto e detecta
               órfãos de sessão anterior (crash); --auto religa os órfãos
-  watch       Fase 1: roda o watcher em foreground (callback CGDisplayReconfiguration +
+  watch       roda o watcher em foreground (callback CGDisplayReconfiguration +
               CFRunLoop; re-aplica disconnect desejado pós-wake, restaura se ativos=0,
               limpa estado de cabo removido); Ctrl+C para sair
 
 FLAGS:
-  --for-session      usa kCGConfigureForSession no disable (experimento PLANO §2.1)
-  --allow-redundant  permite a chamada no-op p/ o experimento do PLANO §2.2 (senão é recusada)
+  --for-session      usa kCGConfigureForSession no disable
+  --allow-redundant  permite a chamada no-op p/ o experimento de chamada redundante (senão é recusada)
   --yes              pula a confirmação interativa (para o watchdog/scripts)
   --poll             força o watcher a operar sem callback/CFRunLoop (comparação/debug)
 
-SEGURANÇA (PLANO §4 — inegociável):
-  · Testes destrutivos SÓ com a tampa do MacBook ABERTA (Clamshell Sleep — PLANO §2.3 item 3)
+SEGURANÇA:
+  · Testes destrutivos SÓ com a tampa do MacBook ABERTA (Clamshell Sleep)
   · Watchdog EXTERNO antes de cada teste:  ./scripts/watchdog.sh <uuid|id> <segundos> &
+  · O app desabilita apenas monitores externos; a tela embutida só aparece em diagnostico/recuperacao
   · Trava do último display ativo real no NÚCLEO, sem override
   · Nunca desabilitar dois displays no mesmo teste"""
 

@@ -1,14 +1,15 @@
 package mdt.core
 
 import com.sun.jna.ptr.PointerByReference
-import mdt.core.ffi.NativeApis
+import mdt.core.domain.DisplayError
+import mdt.core.jna.NativeApis
 import java.util.concurrent.CompletableFuture
 
 /**
  * Transação CGBegin/SLSConfigureDisplayEnabled/CGComplete numa thread descartável.
  *
  * O Complete pode bloquear ~10 s (retraining do link) e a chamada nativa não é
- * cancelável via JNA (PLANO §2.3 item 2): no timeout abandona-se a espera (a thread
+ * cancelável via JNA: no timeout abandona-se a espera (a thread
  * fica presa até a chamada retornar) e nenhuma outra transação é iniciada enquanto
  * esta não retornar — quem garante isso é [fireIfIdle] (check + start atômicos, o que
  * cobre corridas entre threads, ex.: worker do watcher × shutdown hook).

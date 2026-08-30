@@ -9,5 +9,5 @@ dependencies {
 
 application {
     mainClass.set("mdt.cli.MainKt")
-    applicationName = "mdt-poc"
+    applicationName = "macdisplaytoggle"
 }

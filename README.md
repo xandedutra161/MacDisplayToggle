@@ -1,25 +1,44 @@
 # MacDisplayToggle
 
-Utilitário de barra de menu para macOS que **desabilita e religa monitores externos
-de verdade** (disconnect real — o display some da configuração do sistema, como o
-*Disconnect* do BetterDisplay) e os religa **sem replug do cabo**. Projeto de estudo
-de **Kotlin + Compose Multiplatform (Desktop/JVM) + JNA** (interop com APIs nativas
-privadas do macOS, sem uma linha de Swift/ObjC compilado).
+App de barra de menu para macOS que **desliga e religa monitores externos de
+verdade**: o monitor some da configuração do sistema (disconnect real, não
+apenas tela preta) e volta **sem precisar replugar o cabo**.
 
-- Fonte da verdade técnica: **`PLANO_DE_DESENVOLVIMENTO.md`** (progresso marcado por fase)
-- Registros de validação: `OBSERVACOES_FASE0.md` · `FASE1` · `FASE2`
-- Status: **Fases 0–3 concluídas** (2026-08-29) — app funcional, empacotado e validado
-  na máquina real (M4, macOS Tahoe 26.5.2)
+Regra de produto fixa: **a tela embutida do MacBook nunca é um alvo**. Ela não
+aparece como opção na interface e o núcleo bloqueia qualquer tentativa de
+desligá-la — a tela interna só é considerada para diagnóstico, contagem de
+segurança e recuperação.
+
+Escrito em **Kotlin + Compose Multiplatform (Desktop/JVM) + JNA**, com interop
+direto com APIs nativas do macOS, sem Swift/ObjC compilado.
+
+## Funcionalidades
+
+- Lista os monitores externos conectados;
+- Desliga um monitor externo com disconnect real;
+- Religa monitores desligados pelo próprio app;
+- Reverte o desligamento automaticamente em 20 s se você não confirmar;
+- Reaplica o estado desejado após wake, quando o macOS religa um monitor sozinho;
+- Recupera monitores órfãos de uma sessão anterior no próximo launch;
+- Vive só na barra de menu, sem ícone no Dock.
+
+## O que ele não faz
+
+- Não desliga a tela embutida do MacBook;
+- Não controla brilho, DDC, resolução, HiDPI, espelhamento ou displays virtuais;
+- Não pretende ser uma ferramenta completa de gerenciamento de monitores.
 
 ## Requisitos
 
-- **Apple Silicon** (Intel sem suporte — o disconnect real não funciona de forma
-  confiável lá, ver PLANO §1);
-- **macOS 13 (Ventura) ou superior** (validado no Tahoe 26.x);
-- Sem App Store e sem sandbox (usa API privada do SkyLight — PLANO §2.4);
-  assinatura ad-hoc, uso pessoal.
+- Apple Silicon (Intel não é suportado — o disconnect real não funciona de
+  forma confiável nessa família);
+- macOS 13 Ventura ou superior;
+- Sessão gráfica local (as APIs de display não funcionam via SSH).
 
-## Instalar / rodar
+O app usa uma API privada do macOS e por isso é distribuído fora da App Store,
+sem sandbox. Validado em máquina real Apple Silicon (M4, macOS Tahoe 26.5.2).
+
+## Instalação
 
 ```sh
 ./gradlew :app:createDistributable
@@ -27,59 +46,87 @@ cp -R app/build/compose/binaries/main/app/MacDisplayToggle.app /Applications/
 open /Applications/MacDisplayToggle.app
 ```
 
-(ou `./gradlew :app:packageDmg` → `app/build/compose/binaries/main/dmg/MacDisplayToggle-1.0.0.dmg`;
-para desenvolvimento, `./gradlew :app:run`.)
+Para gerar um DMG:
 
-O app vive só na **barra de menu** (sem Dock — `LSUIElement`). Clique no ícone de
-monitor: popup com a lista de displays e um toggle por monitor. Desabilitar pede
-confirmação e **religa sozinho em 20 s** se você não clicar em "Manter". "Religar
-todos" está sempre visível; "Sair" religa tudo o que o app tiver desabilitado.
+```sh
+./gradlew :app:packageDmg
+```
 
-## Regras de segurança (no núcleo, não na UI)
+## Uso
 
-- **Nunca** desabilita a **tela embutida** — o app é para monitores externos
-  (decisão de produto; religar a embutida é permitido);
-- **Nunca** desabilita o último display ativo real (placeholder do macOS não conta);
-- Religamento sempre **comprovado por enumeração** (nunca pelo retorno da API),
-  com retry; identidade (UUID/ID/serial) persistida em
-  `~/Library/Application Support/MacDisplayToggle/state.json` **antes** de desabilitar;
-- Se o app morrer com um display desabilitado, a próxima inicialização detecta o
-  órfão e oferece religar (`reconcile`); um watcher re-aplica o estado desejado
-  após wake e **restaura um display se a contagem de ativos chegar a zero**;
-- Ao sair, religa **apenas** o que o próprio app desabilitou.
+O app fica na barra de menu. Clique no ícone de monitor para abrir o popup com
+os monitores externos. Ao desligar um monitor, o app pede confirmação e religa
+automaticamente em 20 s se você não clicar em "Manter".
 
-## Limitações conhecidas
+O botão "Religar todos" religa apenas monitores que o próprio MacDisplayToggle
+desligou. Ao sair, o app também religa apenas o que ele mesmo desligou.
 
-- API privada (`SLSConfigureDisplayEnabled`) — pode quebrar em qualquer update do
-  macOS; o app resolve os símbolos em runtime (fallbacks SLS→CGS e CG→ColorSync)
-  e falha graciosamente;
-- Cabo desplugado **enquanto desabilitado**: o WindowServer descarta o registro —
-  replug (ou outra porta) resolve; o app limpa o estado ao detectar o sumiço;
-- Conflito com DisplayLink não tratado (fora de escopo); minoria de máquinas
-  (relatos em M3) pode não religar via API — validado OK neste M4;
-- App JVM: ~150–250 MB de RAM residente (trade-off consciente do estudo de KMP);
-- Roteiros de standby do monitor e sleep/wake reais seguem como validação manual
-  opcional (mecanismo equivalente já validado por simulação — `OBSERVACOES_FASE1.md`).
-
-## Playbook de emergência (display preso desabilitado)
-
-1. **Abrir a tampa do MacBook** (dá uma tela) → religar pelo app ou pela CLI;
-2. CLI de socorro: `cli/build/install/mdt-poc/bin/mdt-poc enable <id|uuid>`
-   (estado salvo em disco; não funciona via SSH — precisa da sessão gráfica);
-3. Abrir o **Lunar** (religa tudo no startup);
-4. `sudo killall -HUP WindowServer` (derruba a sessão gráfica);
-5. Reboot · 6. Replug do cabo (ou outra porta).
-
-## Desenvolvimento
-
-Módulos: `:core` (núcleo `DisplayManager` + watcher + bindings JNA), `:cli`
-(harness de validação: `list`, `test-cycle`, `disable --failsafe`, `enable`,
-`reconcile`, `watch`), `:app` (UI Compose).
+Há também uma CLI de diagnóstico e recuperação:
 
 ```sh
 ./gradlew :cli:installDist
-cli/build/install/mdt-poc/bin/mdt-poc list   # não-destrutivo
+cli/build/install/macdisplaytoggle/bin/macdisplaytoggle list
 ```
 
-Testes destrutivos: SEMPRE com a tampa aberta e watchdog externo
-(`./scripts/watchdog.sh <uuid> <segundos> &`) — protocolo completo no PLANO §4.
+O comando `list` é diagnóstico e mostra tudo (incluindo tela embutida e
+entradas internas do sistema); os comandos destrutivos (`disable`,
+`test-cycle`) operam apenas monitores externos e exigem confirmação.
+
+## Segurança
+
+As regras críticas vivem no núcleo, não apenas na interface:
+
+- A tela embutida nunca é desligada;
+- O último display ativo real nunca é desligado;
+- Displays placeholder do macOS não contam como displays reais;
+- A identidade do monitor é persistida **antes** do desligamento;
+- Religar só é considerado sucesso após a enumeração confirmar o retorno;
+- O launch reconcilia estado antigo antes de iniciar o watcher;
+- Ao encerrar, o app religa apenas o que ele mesmo desligou.
+
+## Recuperação de emergência
+
+Se um monitor externo ficar preso desligado:
+
+1. Abra a tampa do MacBook para ter uma tela local;
+2. Rode `cli/build/install/macdisplaytoggle/bin/macdisplaytoggle enable <id|uuid>`;
+3. Rode `sudo killall -HUP WindowServer` (a sessão gráfica reinicia);
+4. Reinicie o Mac;
+5. Replugue o cabo ou use outra porta.
+
+## Limitações conhecidas
+
+- Usa API privada (`SLSConfigureDisplayEnabled`), que pode quebrar em updates
+  do macOS;
+- Desplugar o cabo com o monitor desligado pode fazer o sistema descartar o
+  registro do monitor; replug ou troca de porta resolve;
+- Monitores DisplayLink não são tratados;
+- Algumas máquinas podem não religar via API privada, mesmo em Apple Silicon;
+- Por rodar na JVM, usa mais memória que uma implementação nativa em Swift.
+
+## Como foi feito
+
+Este projeto nasceu **vibecodando**, para resolver um problema simples que eu
+tinha no dia a dia. O código funciona e foi validado em máquina real, mas com
+certeza tem espaço para melhorias — sugestões e PRs são bem-vindos.
+
+## Desenvolvimento
+
+```sh
+./gradlew check              # compila e roda os testes unitários
+./gradlew :app:run           # app em modo de desenvolvimento
+./gradlew :cli:installDist   # CLI técnica
+```
+
+Módulos:
+
+- `:core` — regras de segurança, portas/adapters, bindings JNA, transações,
+  estado persistido e watcher;
+- `:cli` — harness técnico e ferramenta de recuperação;
+- `:app` — barra de menu e popup em Compose Desktop.
+
+Os testes unitários usam fakes e não tocam em display real. Testes destrutivos
+são manuais: tampa do MacBook aberta e watchdog externo armado
+(`./scripts/watchdog.sh <uuid|id> <segundos> &`). Detalhes em
+[CONTRIBUTING.md](CONTRIBUTING.md); vulnerabilidades, em
+[SECURITY.md](SECURITY.md).

@@ -1,6 +1,6 @@
 #!/bin/zsh
-# Watchdog EXTERNO ao processo do PoC (protocolo Fase 0 do PLANO_DE_DESENVOLVIMENTO.md):
-# religa <id|uuid> após <segundos>, mesmo que a JVM do PoC tenha morrido (ex.: SIGSEGV
+# Watchdog EXTERNO ao processo da CLI (obrigatório antes de testes destrutivos):
+# religa <id|uuid> após <segundos>, mesmo que a JVM da CLI tenha morrido (ex.: SIGSEGV
 # de binding errado — o failsafe interno morre junto com o processo).
 #
 # Uso (ANTES de cada teste destrutivo, em outro terminal):
@@ -13,7 +13,7 @@ set -u
 target="${1:?uso: watchdog.sh <id|uuid> <segundos>}"
 secs="${2:?uso: watchdog.sh <id|uuid> <segundos>}"
 here="${0:A:h}"
-cli="$here/../cli/build/install/mdt-poc/bin/mdt-poc"
+cli="$here/../cli/build/install/macdisplaytoggle/bin/macdisplaytoggle"
 if [[ ! -x "$cli" ]]; then
   echo "[watchdog] CLI não encontrada em $cli — rode ./gradlew :cli:installDist antes" >&2
   exit 1

@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import mdt.core.application.DefaultExternalDisplayToggleFacade
 import mdt.core.DisplayManager
 import java.awt.BasicStroke
 import java.awt.Color
@@ -33,23 +34,24 @@ import java.awt.image.BaseMultiResolutionImage
 import java.awt.image.BufferedImage
 
 fun main() {
-    // Sem ícone no Dock durante o dev (a Fase 3 fixa via LSUIElement no Info.plist).
+    // Sem ícone no Dock durante o dev (o pacote .app fixa via LSUIElement no Info.plist).
     // Precisa ser definido ANTES de qualquer inicialização do AWT.
     System.setProperty("apple.awt.UIElement", "true")
 
     val manager = DisplayManager { println("core: $it") }
-    // Ordem obrigatória (§ Fase 1): reconciliar ANTES de armar o watcher
-    val launchReport = manager.reconcileAtLaunch(autoEnableOrphans = false)
-    val watcher = manager.startWatcher()
-    // Experimento da Fase 2: o runloop do AppKit (que o AWT roda na main) pode
+    val facade = DefaultExternalDisplayToggleFacade(manager)
+    // Ordem obrigatória: reconciliar ANTES de armar o watcher
+    val launchReport = facade.reconcileAtLaunch(autoEnableOrphans = false)
+    val watcher = facade.startWatcher()
+    // O runloop do AppKit (que o AWT roda na main) pode
     // entregar eventos externos ao callback; senão o polling de 3 s cobre
     watcher.registerCallbackOnly()
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    val state = AppState(manager, scope)
+    val state = AppState(facade, scope)
     if (launchReport.orphansDetected.isNotEmpty()) {
         state.lastMessage =
-            "${launchReport.orphansDetected.size} display(s) desabilitado(s) por sessão anterior — use \"Religar todos\""
+            "${launchReport.orphansDetected.size} monitor(es) externo(s) desligado(s) por sessão anterior — use \"Religar todos\""
     }
     state.refresh()
 
@@ -58,7 +60,7 @@ fun main() {
         var anchorX by remember { mutableStateOf(600) }
 
         // Janela âncora INVISÍVEL e permanente: sem nenhuma janela na composição o
-        // application{} encerra (validado na Fase 2) — o tray AWT cru não conta.
+        // application{} encerra — o tray AWT cru não conta.
         Window(
             onCloseRequest = {},
             visible = false,
@@ -109,11 +111,11 @@ fun main() {
                     state = state,
                     onQuit = {
                         state.busy = true
-                        state.lastMessage = "encerrando: religando os displays que NÓS desabilitamos…"
+                        state.lastMessage = "encerrando: religando os monitores externos que NÓS desligamos…"
                         scope.launch {
                             runCatching {
                                 watcher.stop()
-                                manager.releaseOnShutdown() // § Fase 1: só o que é nosso
+                                facade.releaseOnShutdown() // só religa o que o próprio app desligou
                             }
                             EventQueue.invokeLater { exitApplication() }
                         }
@@ -133,7 +135,7 @@ private fun setupTray(onClick: (Point) -> Unit): TrayIcon? {
     icon.isImageAutoSize = true
     icon.addMouseListener(object : MouseAdapter() {
         override fun mousePressed(e: MouseEvent) {
-            // O AWT não expõe a posição do ícone no macOS (PLANO §3) — ancorar no clique
+            // O AWT não expõe a posição do ícone no macOS — ancorar no clique
             onClick(MouseInfo.getPointerInfo()?.location ?: Point(600, 0))
         }
     })

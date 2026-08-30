@@ -15,8 +15,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "MacDisplayToggle"
 
-// Layout preparado para as fases do PLANO_DE_DESENVOLVIMENTO.md:
-// :cli  — Fase 0 (PoC de validação, CLI sem UI)
-// :core — Fase 1 (DisplayManager como biblioteca)
-// :app  — Fase 2 (UI de barra de menu em Compose)
+// :core — regras de segurança, portas/adapters e bindings nativos
+// :cli  — harness técnico e ferramenta de recuperação
+// :app  — barra de menu e popup em Compose Desktop
 include(":core", ":cli", ":app")

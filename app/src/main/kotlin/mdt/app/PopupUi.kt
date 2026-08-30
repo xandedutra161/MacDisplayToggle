@@ -38,11 +38,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import mdt.core.DisplayInfo
+import mdt.core.application.ExternalDisplayView
 
 @Composable
 fun PopupUi(state: AppState, onQuit: () -> Unit) {
-    var confirmTarget by remember { mutableStateOf<DisplayInfo?>(null) }
+    var confirmTarget by remember { mutableStateOf<ExternalDisplayView?>(null) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
 
     // Ticker do countdown de auto-reversão; quando o núcleo reverte sozinho, limpa e atualiza
@@ -71,10 +71,13 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
             shape = RoundedCornerShape(14.dp),
             tonalElevation = 3.dp,
             shadowElevation = 10.dp,
-            modifier = Modifier.fillMaxSize(),
+//            modifier = Modifier.fillMaxSize(),
         ) {
             Column(
-                Modifier.fillMaxWidth().padding(14.dp).verticalScroll(rememberScrollState()),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+                    .verticalScroll(rememberScrollState()),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -87,13 +90,15 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
                 }
 
                 if (state.clamshellRisk) {
-                    // Aviso de cenário clamshell (PLANO §4/Fase 2; §2.3 itens 3/6)
+                    // Aviso de cenário clamshell
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        modifier = Modifier.padding(top = 10.dp).fillMaxWidth(),
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .fillMaxWidth(),
                     ) {
                         Text(
-                            "Tampa fechada (clamshell): desabilitar um display agora é arriscado — abra a tampa antes.",
+                            "Tampa fechada (clamshell): desligar um monitor externo agora é arriscado — abra a tampa antes.",
                             Modifier.padding(10.dp),
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -101,15 +106,24 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
                 }
 
                 Spacer(Modifier.height(8.dp))
-                state.displays.forEach { d ->
-                    DisplayRow(d, state, onAskDisable = { confirmTarget = it })
+                if (state.externalDisplays.isEmpty()) {
+                    Text(
+                        "Nenhum monitor externo conectado.",
+                        Modifier.padding(vertical = 16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
+
+                state.externalDisplays.forEach { d ->
+                    ExternalDisplayRow(d, state, onAskDisable = { confirmTarget = it })
                 }
 
                 state.pendingRevert?.let { p ->
                     val secs = ((p.deadlineMs - now) / 1000).coerceAtLeast(0)
                     Card(Modifier.padding(top = 10.dp).fillMaxWidth()) {
                         Column(Modifier.padding(10.dp)) {
-                            Text("Manter desabilitado? Revertendo em ${secs}s…", style = MaterialTheme.typography.bodyMedium)
+                            Text("Manter monitor externo desligado? Revertendo em ${secs}s…", style = MaterialTheme.typography.bodyMedium)
                             Row(Modifier.padding(top = 8.dp)) {
                                 Button(onClick = { state.keepDisabled() }) { Text("Manter") }
                                 Spacer(Modifier.width(8.dp))
@@ -131,7 +145,7 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider()
                 Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Sempre visível (PLANO §4/Fase 2)
+                    // Sempre visível
                     TextButton(onClick = { state.enableAllOurs() }) { Text("Religar todos") }
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onQuit) { Text("Sair") }
@@ -143,10 +157,10 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
     confirmTarget?.let { d ->
         AlertDialog(
             onDismissRequest = { confirmTarget = null },
-            title = { Text("Desabilitar \"${d.name}\"?") },
+            title = { Text("Desligar \"${d.name}\"?") },
             text = {
                 Text(
-                    "O display some da configuração do sistema (disconnect real, como o BetterDisplay) " +
+                    "O monitor externo some da configuração do sistema (disconnect real) " +
                         "e religa sozinho em 20 s se você não confirmar \"Manter\". Failsafes: reversão " +
                         "automática, \"Religar todos\" e religamento ao sair do app." +
                         if (state.clamshellRisk) "\n\n⚠️ Tampa fechada: risco de Clamshell Sleep — abra a tampa antes." else ""
@@ -156,7 +170,7 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
                 Button(onClick = {
                     state.requestDisable(d)
                     confirmTarget = null
-                }) { Text("Desabilitar") }
+                }) { Text("Desligar") }
             },
             dismissButton = { TextButton(onClick = { confirmTarget = null }) { Text("Cancelar") } },
         )
@@ -164,7 +178,7 @@ fun PopupUi(state: AppState, onQuit: () -> Unit) {
 }
 
 @Composable
-private fun DisplayRow(d: DisplayInfo, state: AppState, onAskDisable: (DisplayInfo) -> Unit) {
+private fun ExternalDisplayRow(d: ExternalDisplayView, state: AppState, onAskDisable: (ExternalDisplayView) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -173,20 +187,17 @@ private fun DisplayRow(d: DisplayInfo, state: AppState, onAskDisable: (DisplayIn
             Text(d.name, style = MaterialTheme.typography.bodyLarge)
             Text(
                 when {
-                    // Tela embutida é intocável (decisão de produto — só religa)
-                    d.builtin && !d.isDisabled -> "sempre ativa — o app só desabilita externos"
-                    d.isDisabled -> "desabilitado"
+                    d.disabled -> "desligado"
                     d.active -> "ativo"
                     else -> "online (inativo)"
                 },
                 style = MaterialTheme.typography.bodySmall,
-                color = if (d.isDisabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                color = if (d.disabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
             )
         }
         Switch(
-            checked = !d.isDisabled,
-            // embutido: só religável (toggle travado quando já ativo)
-            enabled = !state.busy && !(d.builtin && !d.isDisabled),
+            checked = !d.disabled,
+            enabled = !state.busy,
             onCheckedChange = { wantOn -> if (wantOn) state.enable(d) else onAskDisable(d) },
         )
     }

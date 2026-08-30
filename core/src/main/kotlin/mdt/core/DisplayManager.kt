@@ -1,37 +1,51 @@
 package mdt.core
 
-import mdt.core.ffi.NativeApis
-import mdt.core.ffi.kCGConfigurePermanently
+import mdt.core.adapters.NativeDisplayEventSource
+import mdt.core.adapters.NativeDisplayGateway
+import mdt.core.adapters.NativeTransactionRunner
+import mdt.core.application.DisplayReconciler
+import mdt.core.domain.DisableBlock
+import mdt.core.domain.DisplayError
+import mdt.core.domain.DisplayInfo
+import mdt.core.domain.DisplayPolicy
+import mdt.core.domain.SavedDisplay
+import mdt.core.jna.NativeApis
+import mdt.core.jna.kCGConfigurePermanently
+import mdt.core.ports.DisplayEventSource
+import mdt.core.ports.DisplayGateway
+import mdt.core.ports.DisplayStateRepository
+import mdt.core.ports.EventSink
+import mdt.core.ports.TransactionRunner
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
- * Núcleo da Fase 1 (PLANO §4): as regras de segurança vivem AQUI, não na UI.
- * - trava do último display ativo real (filtro de placeholder — §2.3 item 4);
- * - no-op recusado por enumeração (a API aborta com 1001 de qualquer forma — Fase 0 obs. b);
- * - religamento sempre verificado por enumeração, com retry (§2.3 item 1);
- * - identidade persistida ANTES de desabilitar (§2.2);
+ * As regras de segurança vivem AQUI, não na UI.
+ * - trava do último display ativo real (filtro de placeholder);
+ * - no-op recusado por enumeração (a API abortaria com 1001 de qualquer forma);
+ * - religamento sempre verificado por enumeração, com retry;
+ * - identidade persistida ANTES de desabilitar;
  * - no launch: reconciliar SEMPRE antes de armar o watcher; NUNCA re-aplicar
- *   disconnect no launch (§2.3 item 5);
+ *   disconnect no launch;
  * - no encerramento: religar apenas o que NÓS desabilitamos.
  */
-class DisplayManager(internal val onLog: (String) -> Unit = ::println) {
+class DisplayManager(
+    internal val stateRepository: DisplayStateRepository = StateStore,
+    internal val displayGateway: DisplayGateway = NativeDisplayGateway,
+    transactionRunner: TransactionRunner = NativeTransactionRunner,
+    notebookDetector: () -> Boolean = ::detectNotebook,
+    internal val onLog: EventSink = EventSink.Stdout,
+) {
+    internal val displayOperations: DisplayOperations =
+        DisplayOperations(displayGateway, transactionRunner, onLog)
 
-    /** Notebook detectado pela BATERIA (IOKit — §2.3 item 6), nunca pelo built-in nas listas. */
-    val isNotebook: Boolean by lazy {
-        val matching = NativeApis.iokit.IOServiceMatching("AppleSmartBattery") ?: return@lazy false
-        val service = NativeApis.iokit.IOServiceGetMatchingService(0, matching) // consome `matching`
-        if (service == 0) {
-            false
-        } else {
-            NativeApis.iokit.IOObjectRelease(service)
-            true
-        }
-    }
 
-    fun snapshot(): List<DisplayInfo> = Displays.snapshot()
+    /** Notebook detectado pela BATERIA (IOKit), nunca pelo built-in nas listas. */
+    val isNotebook: Boolean by lazy(notebookDetector)
+
+    fun snapshot(): List<DisplayInfo> = displayGateway.snapshot()
 
     /**
      * Desabilita com todas as travas. Persiste a identidade antes; remove o registro
@@ -41,27 +55,16 @@ class DisplayManager(internal val onLog: (String) -> Unit = ::println) {
         val snap = snapshot()
         val cur = snap.firstOrNull { it.id == targetId }
             ?: throw DisplayError("display $targetId não encontrado em nenhuma lista")
-        if (cur.isPlaceholder) throw DisplayError("alvo é o display placeholder do macOS, não um display real")
-        // Decisão de produto (2026-08-29): a tela embutida é INTOCÁVEL — o app existe
-        // para desabilitar monitores EXTERNOS. Religar embutido continua permitido.
-        if (cur.builtin) throw DisplayError("a tela embutida não pode ser desabilitada — o app desabilita apenas monitores externos")
-        if (!cur.online) throw DisplayError("no-op recusado: display $targetId já está desabilitado (§2.2)")
-        val remaining = snap.count { it.isActiveReal && it.id != cur.id }
-        if (cur.isActiveReal && remaining < 1) {
-            throw DisplayError(
-                "TRAVA DE SEGURANÇA: ${cur.name} (id=$targetId) é o último display ativo real — " +
-                    "desabilitá-lo apagaria/dormiria a máquina (§2.3 item 3)"
-            )
-        }
+        DisplayPolicy.disableBlock(snap, cur)?.let { throw DisplayError(disableBlockMessage(it, cur, targetId)) }
         val saved = cur.toSaved()
-        StateStore.remember(saved) // identidade em disco ANTES de desabilitar (§2.2)
+        stateRepository.remember(saved) // identidade em disco ANTES de desabilitar
         try {
-            Ops.disableVerified(cur.id, flag)
+            displayOperations.disableVerified(cur.id, flag)
         } catch (e: Throwable) {
-            StateStore.forget(saved)
+            stateRepository.forget(saved)
             throw e
         }
-        onLog("desabilitado: ${saved.label()}")
+        onLog.log("desabilitado: ${saved.label()}")
         return saved
     }
 
@@ -71,61 +74,86 @@ class DisplayManager(internal val onLog: (String) -> Unit = ::println) {
      * se falhar (o display continua sendo um "desabilitado por nós" a recuperar).
      */
     fun enable(saved: SavedDisplay): Int? {
-        StateStore.forget(saved)
-        val id = Ops.enableVerified(saved)
+        stateRepository.forget(saved)
+        val id = displayOperations.enableVerified(saved)
         if (id == null) {
-            StateStore.remember(saved)
+            stateRepository.remember(saved)
         } else {
-            onLog("religado: ${saved.label()} (id=$id, comprovado por enumeração)")
+            onLog.log("religado: ${saved.label()} (id=$id, comprovado por enumeração)")
         }
         return id
     }
 
     /** "Religar todos" — apenas os NOSSOS (displays de outros apps não são nossos para mexer). */
     fun enableAllOurs(): Map<SavedDisplay, Int?> =
-        StateStore.load().disabledByUs.associateWith { enable(it) }
+        stateRepository.load().disabledByUs.associateWith { enable(it) }
 
-    /** Ao encerrar o app (Fase 2 chamará no quit): religar apenas o que nós desabilitamos. */
+    /** Ao encerrar o app (o app chama no quit): religar apenas o que nós desabilitamos. */
     fun releaseOnShutdown(): Map<SavedDisplay, Int?> = enableAllOurs()
 
+    /** Arma o failsafe de encerramento com o gateway/runner/estado DESTE manager. */
+    fun armShutdownRecovery(saved: SavedDisplay) {
+        PanicGuard.arm(saved, displayOperations, stateRepository)
+    }
+
+    fun disarmShutdownRecovery() {
+        PanicGuard.disarm()
+    }
+
     /**
-     * Reconciliação de inicialização (padrão `reconcile` do Crisp — § Fase 1):
+     * Reconciliação de inicialização (padrão `reconcile`):
      * o que já está online sai do conjunto desejado; o que continua desabilitado é
      * órfão de sessão anterior (crash) — oferecido/religado, NUNCA re-desabilitado.
      * Rodar SEMPRE antes de armar o watcher (senão o 1º tick re-aplicaria disconnect
-     * no launch, violando a regra §2.3 item 5).
+     * no launch).
      */
     fun reconcileAtLaunch(autoEnableOrphans: Boolean = false): ReconcileReport {
         val alreadyOnline = mutableListOf<SavedDisplay>()
         val orphansDetected = mutableListOf<SavedDisplay>()
         val orphansEnabled = mutableListOf<SavedDisplay>()
         val orphansStuck = mutableListOf<SavedDisplay>()
-        for (saved in StateStore.load().disabledByUs) {
-            val online = Ops.matchOnline(saved)
+        for (saved in stateRepository.load().disabledByUs) {
+            val online = displayOperations.matchOnline(saved)
             if (online != null) {
-                StateStore.forget(saved)
+                stateRepository.forget(saved)
                 alreadyOnline += saved
-                onLog("reconcile: ${saved.label()} já está online (id=$online) — removido do estado desejado")
+                onLog.log("reconcile: ${saved.label()} já está online (id=$online) — removido do estado desejado")
             } else if (autoEnableOrphans) {
-                onLog("reconcile: religando órfão de sessão anterior ${saved.label()}")
+                onLog.log("reconcile: religando órfão de sessão anterior ${saved.label()}")
                 if (enable(saved) != null) orphansEnabled += saved else orphansStuck += saved
             } else {
                 orphansDetected += saved
-                onLog("reconcile: ÓRFÃO detectado ${saved.label()} (sessão anterior) — religue com 'enable' ou 'reconcile --auto'")
+                onLog.log("reconcile: ÓRFÃO detectado ${saved.label()} (sessão anterior) — religue com 'enable' ou 'reconcile --auto'")
             }
         }
         return ReconcileReport(alreadyOnline, orphansDetected, orphansEnabled, orphansStuck)
     }
 
     /**
-     * Watcher da Fase 1. Chame [reconcileAtLaunch] antes. Para callbacks ativos, a
+     * Watcher de reconfiguração. Chame [reconcileAtLaunch] antes. Para callbacks ativos, a
      * thread onde o CG inicializou deve chamar [Watcher.runLoopBlocking] (na CLI, a
-     * main; na Fase 2 o runloop do AppKit cobre) — sem isso opera só por polling.
+     * main; no app o runloop do AppKit cobre) — sem isso opera só por polling.
      */
-    fun startWatcher(pollOnly: Boolean = false, settleMs: Long = 1_500): Watcher =
-        Watcher(this, onLog, pollOnly, settleMs).also { it.start() }
+    fun startWatcher(
+        pollOnly: Boolean = false,
+        settleMs: Long = 1_500,
+        eventSource: DisplayEventSource = NativeDisplayEventSource(onLog),
+    ): Watcher =
+        Watcher(
+            reconciler = DisplayReconciler(
+                displayGateway = displayGateway,
+                stateRepository = stateRepository,
+                displayOperations = displayOperations,
+                enableManagedDisplay = ::enable,
+                onLog = onLog,
+            ),
+            eventSource = eventSource,
+            onLog = onLog,
+            pollOnly = pollOnly,
+            settleMs = settleMs,
+        ).also { it.start() }
 
-    // ---- Timer de reversão automática opcional (estilo diálogo de resolução — § Fase 1) ----
+    // ---- Timer de reversão automática opcional (estilo diálogo de resolução) ----
 
     private val revertExec = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "auto-revert").apply { isDaemon = true }
@@ -138,8 +166,8 @@ class DisplayManager(internal val onLog: (String) -> Unit = ::println) {
         val key = revertKey(saved)
         pendingReverts[key] = revertExec.schedule({
             pendingReverts.remove(key)
-            if (Ops.matchOnline(saved) == null) {
-                onLog("auto-revert: sem confirmação em ${revertSeconds}s — religando ${saved.label()}")
+            if (displayOperations.matchOnline(saved) == null) {
+                onLog.log("auto-revert: sem confirmação em ${revertSeconds}s — religando ${saved.label()}")
                 enable(saved)
             }
         }, revertSeconds, TimeUnit.SECONDS)
@@ -151,6 +179,17 @@ class DisplayManager(internal val onLog: (String) -> Unit = ::println) {
         pendingReverts.remove(revertKey(saved))?.cancel(false) ?: false
 
     private fun revertKey(saved: SavedDisplay) = saved.uuid ?: saved.id.toString()
+
+    private fun disableBlockMessage(block: DisableBlock, cur: DisplayInfo, targetId: Int): String = when (block) {
+        DisableBlock.PLACEHOLDER -> "alvo é o display placeholder do macOS, não um display real"
+        DisableBlock.BUILTIN ->
+            "a tela embutida não pode ser desabilitada — o app desabilita apenas monitores externos"
+
+        DisableBlock.ALREADY_DISABLED -> "no-op recusado: display $targetId já está desabilitado"
+        DisableBlock.LAST_ACTIVE_REAL ->
+            "TRAVA DE SEGURANÇA: ${cur.name} (id=$targetId) é o último display ativo real — " +
+                "desabilitá-lo apagaria/dormiria a máquina"
+    }
 }
 
 data class ReconcileReport(
@@ -159,3 +198,14 @@ data class ReconcileReport(
     val orphansEnabled: List<SavedDisplay>,
     val orphansStuck: List<SavedDisplay>,
 )
+
+private fun detectNotebook(): Boolean {
+    val matching = NativeApis.iokit.IOServiceMatching("AppleSmartBattery") ?: return false
+    val service = NativeApis.iokit.IOServiceGetMatchingService(0, matching) // consome `matching`
+    return if (service == 0) {
+        false
+    } else {
+        NativeApis.iokit.IOObjectRelease(service)
+        true
+    }
+}
